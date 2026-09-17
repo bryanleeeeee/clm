@@ -1,8 +1,9 @@
+from clm.presentation import header
 from copy import deepcopy
 from uuid import uuid4
 import streamlit as st
 from clm.streamlit_support import state,submit,condition_editor
-data=state();st.title('Rules & policies');st.caption('When a client matches these conditions, collect the right evidence. No code required.')
+data=state();header('Policy studio','Rules & policies','Turn policy into clear requirements. Configure conditions, preview their impact, and keep every case consistent.')
 st.info('Base account opening, identity, address and tax forms always apply. Conditional policies add documents or required form fields. Compliance can save changes.')
 with st.container(horizontal=True):
     for r in data['rules']:

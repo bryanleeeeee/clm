@@ -20,6 +20,7 @@ def test_navigation_and_synthetic_notice(ui):
 
 def test_create_case_and_client_role(ui):
     ui.switch_page('app_pages/cases.py').run()
+    next(x for x in ui.button if x.label=='New onboarding').click().run()
     next(x for x in ui.text_input if x.label=='Client / entity name').set_value('Streamlit Test')
     next(x for x in ui.text_input if x.label=='Email address').set_value('streamlit@example.com')
     next(x for x in ui.button if x.label=='Create onboarding').click().run()
@@ -65,6 +66,35 @@ def test_native_form_builder(ui):
     data=ui.session_state['_api'].request('/state')
     assert data['ui']['customFields'][0]['key']=='investment_goal'
     ui.switch_page('app_pages/cases.py').run()
+    next(x for x in ui.button if x.label=='Open case').click().run()
     next(x for x in ui.segmented_control if x.label=='Case section').set_value('Profile').run()
     assert any(x.label=='Investment goal *' for x in ui.text_input)
     assert not ui.exception
+
+def test_dashboard_case_shortcuts_and_directory(ui):
+    next(x for x in ui.button if x.label=='Open case').click().run()
+    assert not ui.exception
+    # AppTest needs its page hash synchronized after a programmatic switch.
+    ui.switch_page('app_pages/cases.py').run()
+    next(x for x in ui.button if x.label=='Upload & review documents').click().run()
+    assert next(x for x in ui.segmented_control if x.label=='Case section').value=='Documents'
+    next(x for x in ui.button if x.label=='All relationships').click().run()
+    next(x for x in ui.segmented_control if x.label=='Workspace view').set_value('Pipeline board').run()
+    assert not ui.exception
+    next(x for x in ui.text_input if x.label=='Find a relationship').set_value('Isabelle').run()
+    assert len([x for x in ui.button if x.label=='Open case'])==1
+    next(x for x in ui.button if x.label=='Open case').click().run()
+    assert not ui.exception
+    assert any(x.value=='Isabelle Tan' for x in ui.subheader)
+
+
+def test_dashboard_new_onboarding_dialog(ui):
+    next(x for x in ui.button if x.label=='New onboarding').click().run()
+    assert not ui.exception
+    assert any(x.label=='Client / entity name' for x in ui.text_input)
+    ui.switch_page('app_pages/cases.py').run()
+    next(x for x in ui.text_input if x.label=='Client / entity name').set_value('Dashboard Demo')
+    next(x for x in ui.text_input if x.label=='Email address').set_value('dashboard@example.com')
+    next(x for x in ui.button if x.label=='Create onboarding').click().run()
+    assert not ui.exception
+    assert any(x.value=='Dashboard Demo' for x in ui.subheader)

@@ -48,14 +48,18 @@ Python 3.14 is tested locally. Validate dependencies against your selected Cloud
 
 ## Demo walkthrough
 
-1. **Relationship manager → Onboarding:** create a fictional individual or entity and complete their profile.
-2. Select the case under **Client portal identity**, switch to **Client**, and upload account forms and required PDF/JPEG/PNG evidence (10 MB maximum per document).
+1. **Relationship manager → New onboarding:** create a fictional individual or entity and complete their profile.
+2. Expand **Client portal preview** in the sidebar, select the case under **Client portal identity**, switch to **Client**, and upload account forms and required PDF/JPEG/PNG evidence (10 MB maximum per document).
 3. Switch to **Operations** or **Compliance** to verify each required document with notes.
 4. Advance the case to review; **Compliance** records identity, screening, source-of-wealth and tax checks.
 5. A **Relationship manager** submits for approval. **Compliance** independently activates the relationship. Unmet requirements block progression.
 6. Start periodic review or close the relationship with a reason. Review resets due diligence. Dashboards, reports, document registers and case histories reflect the updates.
 
 The controls distinguish received evidence from verified evidence. Upload bytes persist in SQLite; file signatures, file size, permissions and lifecycle gates are checked in Python.
+
+## Workspace experience
+
+The overview includes direct case access, approval/attention queues and deadline priorities. Onboarding offers a searchable relationship list and a horizontal pipeline board, stage/risk filters, and a focused creation dialog. Each case has an evidence checklist, document/profile shortcuts, a lifecycle journey and role-aware next actions. The document register opens the selected case directly into its review workspace. Navigation is grouped into Workspace and Design & governance.
 
 ## Configure without writing code
 

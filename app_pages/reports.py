@@ -1,8 +1,9 @@
+from clm.presentation import header
 import csv
 import io
 import streamlit as st
 from clm.streamlit_support import state
-data=state();st.title('Reports & insights');st.caption('Computed from the current synthetic client book.')
+data=state();header('Relationship intelligence','Reports & insights','A connected view of your pipeline, client risk and team workload.')
 cases=data['cases'];a,b=st.columns(2)
 with a,st.container(border=True):
     st.subheader('Assets by stage')

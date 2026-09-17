@@ -5,8 +5,9 @@ import streamlit as st
 from clm.streamlit_support import state,api,condition_editor
 from clm.defaults import STAFF,GUARDS,KINDS
 from clm.domain import mandatory_guards
+from clm.presentation import header,journey
 
-data=state();st.title('Workflow studio');st.caption('Design the journey. Make the decisions clear. Test before publishing.')
+data=state();header('Journey orchestration','Workflow studio','Design the journey. Make the decisions clear. Test before publishing.')
 if '_workflow_edit' not in st.session_state:
     st.session_state['_workflow_edit']=deepcopy(data['workflowDraft']);st.session_state['_workflow_revision']=data['draftRevision'];st.session_state['_workflow_dirty']=False
 w=st.session_state['_workflow_edit']
@@ -35,11 +36,7 @@ if mode=='Design journey':
         start=st.selectbox('New cases start at',names,index=names.index(w['startStage']) if w['startStage'] in names else 0)
         if st.form_submit_button('Apply workflow details'): w.update(name=name,startStage=start);changed()
     st.subheader('Your journey at a glance')
-    with st.container(horizontal=True):
-        for i,s in enumerate(w['stages']):
-            with st.container(border=True,width=180):
-                st.caption(f'STEP {i+1:02d} · {s["kind"].upper()}')
-                st.markdown('**'+s['name']+'**');st.caption(s['owner']);st.caption(f'{s["slaDays"]} days · '+('Editable' if s['editable'] else 'Locked'))
+    journey(w['stages'])
     st.caption('The cards show display order; routes below determine which steps each client takes.')
     left,right=st.columns([1.2,1])
     with left,st.container(border=True):

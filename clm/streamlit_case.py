@@ -3,31 +3,62 @@ import base64
 import streamlit as st
 from .streamlit_support import api,submit,custom_inputs
 from .defaults import CHECKS
+from .presentation import journey,evidence,due_label
 
 def render_case(c,data,client=False):
     prefix='/cases/'+c['id']
     with st.container(border=True):
-        st.subheader(c['name'])
-        with st.container(horizontal=True):
-            st.badge(c['stage'],color='blue');st.badge(c['risk']+' risk',color={'Low':'green','Medium':'orange','High':'red'}[c['risk']]);st.badge(f'Workflow v{c["workflowVersion"]}',color='gray')
-        st.caption(f'{c["id"]} · {c["owner"]} · Target {c["dueDate"]}')
+        left,right=st.columns([3,1],vertical_alignment='center')
+        with left:
+            st.caption(c['id']+' · '+c['type']+' · '+c['residency'])
+            st.subheader(c['name'])
+            with st.container(horizontal=True):
+                st.badge(c['stage'],color='blue');st.badge(c['risk']+' risk',color={'Low':'green','Medium':'orange','High':'red'}[c['risk']])
+                st.caption('Relationship manager · '+c['owner'])
+        with right:
+            st.markdown('**'+due_label(c)+'**')
+            st.caption(f'Target {c["dueDate"]} · Workflow v{c["workflowVersion"]}')
+    with st.expander('Lifecycle journey · '+c['stage'],icon=':material/route:'):
+        journey(c['workflowDefinition']['stages'],current=c['stage'])
     section=st.segmented_control('Case section',['Overview','Profile','Documents'] if client else ['Overview','Profile','Documents','Due diligence','Activity'],default='Overview',key=c['id']+'_section')
+    def show_section(name): st.session_state[c['id']+'_section']=name
     if section=='Overview':
-        total=len(c['requiredDocuments']);verified=sum(any(d['type']==t and d['status']=='Verified' for d in c['documents']) for t in c['requiredDocuments'])
-        st.progress(verified/max(1,total),text=f'{verified} of {total} required document categories verified')
-        if c['blockers']:
-            st.markdown('**Your next steps**' if client else '**Outstanding evidence and controls**')
-            for issue in c['blockers']: st.write(':material/pending: '+issue)
-        else: st.success('All current policy requirements are satisfied.')
-        if not client:
-            with st.form(c['id']+'_transition'):
-                actions=c['availableActions']
+        left,right=st.columns([1.4,1],gap='large')
+        with left,st.container(border=True):
+            st.subheader('Your onboarding checklist' if client else 'Case readiness')
+            verified,total=evidence(c)
+            st.progress(verified/max(1,total),text=f'{verified} of {total} required document categories verified')
+            for category in c['requiredDocuments']:
+                docs=[d for d in c['documents'] if d['type']==category]
+                ok=any(d['status']=='Verified' for d in docs)
+                label='Verified' if ok else 'Review required' if docs else 'Upload required'
+                st.markdown(f':material/{"check_circle" if ok else "pending"}: **{category}** · {label}')
+            st.button('Upload & review documents' if not client else 'Upload your documents',key=c['id']+'_documents_shortcut',icon=':material/upload_file:',on_click=show_section,args=('Documents',))
+            st.button('Complete client profile',key=c['id']+'_profile_shortcut',icon=':material/person:',on_click=show_section,args=('Profile',))
+        with right,st.container(border=True):
+            st.subheader('What happens next')
+            stage=next(s for s in c['workflowDefinition']['stages'] if s['name']==c['stage'])
+            st.caption(stage['description'])
+            if c['blockers']:
+                with st.expander(f'{len(c["blockers"])} outstanding requirements',expanded=False,icon=':material/checklist:'):
+                    for issue in c['blockers']: st.markdown('• '+issue)
+            else: st.success('All current policy requirements are satisfied.')
+            if not client:
+                actions=[a for a in c['availableActions'] if a['allowed']]
                 if actions:
                     route=st.selectbox('Next action',[a['id'] for a in actions],format_func=lambda uid:next(a['label']+' → '+a['target'] for a in actions if a['id']==uid))
-                    note=st.text_area('Decision note',help='A reason is required for remediation or closure.')
-                    if st.form_submit_button('Move case forward',type='primary'):
-                        submit(prefix+'/transition','POST',dict(action=route,note=note),'Case moved to the next stage')
-                else: st.info('No available routes at this stage. The case is retained for reference.')
+                    chosen=next(a for a in actions if a['id']==route)
+                    if chosen['issues']:
+                        st.caption(f'{len(chosen["issues"])} prerequisites remain. Review the outstanding requirements before proceeding.')
+                    with st.form(c['id']+'_transition'):
+                        note=st.text_area('Decision note',help='A reason is required for remediation or closure.')
+                        if st.form_submit_button('Move case forward',type='primary',icon=':material/arrow_forward:'):
+                            submit(prefix+'/transition','POST',dict(action=route,note=note),'Case moved to the next stage')
+                elif c['availableActions']:
+                    st.info('Next decision is with '+', '.join(sorted({r for a in c['availableActions'] for r in a['roles']}))+'.')
+                else: st.caption('No available routes at this stage. The case is retained for reference.')
+                if c['canReview']: st.button('Open due diligence',icon=':material/fact_check:',on_click=show_section,args=('Due diligence',))
+            else: st.caption('Your relationship manager will review your information and guide you through the next stage.')
     elif section=='Profile':
         with st.form(c['id']+'_profile'):
             left,right=st.columns(2)
@@ -44,6 +75,8 @@ def render_case(c,data,client=False):
             st.caption('Saving a changed profile resets due diligence checks for review.')
             if st.form_submit_button('Save client details',type='primary',disabled=not c['editable']): submit(prefix,'PATCH',values,'Client details saved')
     elif section=='Documents':
+        st.subheader('Your document vault' if client else 'Client document vault')
+        st.caption('Choose a category, upload the evidence, then track its review. PDF, PNG or JPEG · up to 10 MB each.')
         if c['editable']:
             with st.form(c['id']+'_upload',clear_on_submit=True):
                 category=st.selectbox('Document category',c['requiredDocuments'])
@@ -61,7 +94,7 @@ def render_case(c,data,client=False):
                     if d.get('reviewNote'): st.caption('Review: '+d['reviewNote'])
                     content=api().request(prefix+'/documents/'+d['id'],raw=True)
                     st.download_button('Download',content,file_name=d['name'],key='download_'+d['id'])
-                    if not client and c['editable']:
+                    if not client and c['editable'] and data['session']['role'] in ['Compliance','Operations']:
                         with st.expander('Record document review',expanded=False):
                             with st.form('review_'+d['id']):
                                 status=st.selectbox('Outcome',['Verified','Rejected']);note=st.text_area('Review evidence / reason')
@@ -72,7 +105,7 @@ def render_case(c,data,client=False):
             with st.expander(label+(' — complete' if c['kyc'][key] else ' — pending'),expanded=not c['kyc'][key]):
                 with st.form(c['id']+'_kyc_'+key):
                     note=st.text_area('Evidence reference and outcome')
-                    if st.form_submit_button('Reopen check' if c['kyc'][key] else 'Complete check',disabled=not c['canReview']): submit(prefix+'/kyc','PUT',dict(check=key,checked=not c['kyc'][key],note=note),'Due diligence recorded')
+                    if st.form_submit_button('Reopen check' if c['kyc'][key] else 'Complete check',disabled=not c['canReview'] or data['session']['role']!='Compliance'): submit(prefix+'/kyc','PUT',dict(check=key,checked=not c['kyc'][key],note=note),'Due diligence recorded')
     elif section=='Activity':
         with st.form(c['id']+'_note'):
             note=st.text_area('Add a case note')

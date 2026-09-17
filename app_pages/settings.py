@@ -1,10 +1,11 @@
+from clm.presentation import header
 import json
 from copy import deepcopy
 from uuid import uuid4
 import streamlit as st
 from clm.streamlit_support import state,submit
 from clm.defaults import NAV
-data=state();ui=deepcopy(data['ui']);st.title('UI & workspace settings');st.caption('Configure the experience without editing source code. Operations can save changes.')
+data=state();ui=deepcopy(data['ui']);header('Your operating model','UI & workspace settings','Configure your interface, onboarding forms and operating model. Operations can save changes.')
 section=st.segmented_control('Settings section',['Appearance & layout','Form builder','Workspace'],default='Appearance & layout')
 if section=='Appearance & layout':
     with st.form('ui_settings'):
