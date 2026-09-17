@@ -1,0 +1,1 @@
+{"$schema":"https://openapi.vercel.sh/vercel.json","framework":"flask","regions":["sin1"],"functions":{"app.py":{"maxDuration":60,"excludeFiles":"{.venv/**,data/**,artifacts/**,tests/**,app_pages/**,.deploy-vercel/**}"}},"headers":[{"source":"/(.*)","headers":[{"key":"X-Content-Type-Options","value":"nosniff"},{"key":"Referrer-Policy","value":"same-origin"}]}]}

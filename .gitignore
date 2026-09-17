@@ -10,3 +10,6 @@ artifacts/
 .streamlit/secrets.toml
 *.sqlite3*
 .session-key
+
+.vercel/
+.deploy-vercel/

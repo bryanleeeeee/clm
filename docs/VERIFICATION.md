@@ -11,3 +11,12 @@ Six Streamlit AppTest tests cover native page rendering, top synthetic notice, c
 `python tests/browser_demo.py` checks running Streamlit at port 8501 and Flask at port 4176 with Microsoft Edge through Playwright. It checks native navigation, workflow designer rendering, Flask navigation, synthetic notices and JavaScript page errors; captures desktop/mobile screenshots under ignored `artifacts/`. Start both servers first. This script requires Microsoft Edge and the development requirements. The browser check passed locally.
 
 The current tests do not certify production authentication, regulatory compliance, external integrations, load, accessibility or Cloudera tenant compatibility. Community Cloud deployment is performed by the repository owner; it has not been claimed as verified here.
+
+## Vercel and durable storage
+
+- The dedicated PostgreSQL integration test passed: a second application instance reads persisted case/file content; failed writes roll back state and files together; four concurrent writers retain all changes. It creates and removes only its own randomly named test schema.
+- The public Vercel API completed one synthetic onboarding journey: client isolation, required-evidence gate, four PDF uploads, document reviews, four due diligence attestations, independent activation, exact-byte download, archival and a fresh-session persistence check. The archived `Aurelia Demo Verification` case is retained as demonstration evidence.
+- Browser inspection confirmed the live original Aurelia dashboard at `bankclm.vercel.app` and its mobile layout. An isolated browser workspace verified inserting and validating a workflow step and saving a required custom profile field through the new guided editors.
+- The Streamlit deployment was opened and its new grouped navigation, case queues, priorities and branded interface confirmed on the public URL.
+
+`python scripts/check_postgres.py` runs the opt-in storage test using the ignored deployment environment. `python scripts/verify_deployment.py` explicitly creates and archives another synthetic case on the public demo; it is not part of the routine unit suite.

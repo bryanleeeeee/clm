@@ -22,10 +22,19 @@ ROOT=Path(__file__).resolve().parent.parent
 
 def create_app(config=None):
     app=Flask(__name__,static_folder=None)
-    app.config.update(DATA_DIR=os.environ.get('DATA_DIR',str(ROOT/'data')),MAX_CONTENT_LENGTH=15*1024*1024,SESSION_COOKIE_NAME='aurelia_python',SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Strict',SESSION_COOKIE_SECURE=os.environ.get('COOKIE_SECURE','0')=='1',PERMANENT_SESSION_LIFETIME=timedelta(hours=8))
+    app.config.update(DATA_DIR=os.environ.get('DATA_DIR',str(ROOT/'data')),MAX_CONTENT_LENGTH=15*1024*1024,SESSION_COOKIE_NAME='aurelia_python',SESSION_COOKIE_HTTPONLY=True,SESSION_COOKIE_SAMESITE='Strict',SESSION_COOKIE_SECURE=os.environ.get('COOKIE_SECURE','1' if os.environ.get('VERCEL') else '0')=='1',PERMANENT_SESSION_LIFETIME=timedelta(hours=8))
     if config: app.config.update(config)
-    store=Store(app.config['DATA_DIR']);app.extensions['store']=store
+    database_url=app.config.get('DATABASE_URL',os.environ.get('DATABASE_URL'))
+    if database_url:
+        from .postgres_store import PostgresStore
+        store=PostgresStore(database_url,app.config.get('DATABASE_SCHEMA','bankclm'))
+    else:
+        if os.environ.get('VERCEL'): raise RuntimeError('Configure DATABASE_URL for durable Vercel storage')
+        store=Store(app.config['DATA_DIR'])
+    app.extensions['store']=store
+    app.config['UPLOAD_LIMIT_MB']=int(os.environ.get('UPLOAD_LIMIT_MB','3' if os.environ.get('VERCEL') else '10'))
     secret=os.environ.get('SECRET_KEY') or app.config.get('SECRET_KEY')
+    if not secret and database_url: raise RuntimeError('SECRET_KEY is required with PostgreSQL storage')
     if not secret:
         secret_file=store.directory/'.session-key'
         try:
@@ -81,7 +90,7 @@ def create_app(config=None):
         with store.transaction() as (db,_):
             clients=[case_view(c,db,session['role']) for c in db['cases'] if session['role']!='Client' or c['id']==session['clientId']]
             result={k:deepcopy(v) for k,v in db.items() if k not in ['cases','workflowVersions']}
-            result.update(cases=clients,session=dict(session),stages=list(dict.fromkeys([s['name'] for s in db['workflow']['stages']]+[c['stage'] for c in clients])),schema=dict(roles=ROLES,staff=STAFF,checks=CHECKS,fields=FIELDS,guards=GUARDS,kinds=KINDS),synthetic=True)
+            result.update(cases=clients,session=dict(session),stages=list(dict.fromkeys([s['name'] for s in db['workflow']['stages']]+[c['stage'] for c in clients])),schema=dict(roles=ROLES,staff=STAFF,checks=CHECKS,fields=FIELDS,guards=GUARDS,kinds=KINDS),synthetic=True,uploadLimitMB=app.config['UPLOAD_LIMIT_MB'])
             if session['role']=='Client':
                 result.pop('configAudit',None);result.pop('workflowDraft',None)
                 for c in clients: c['activity']=[]
@@ -179,12 +188,12 @@ def create_app(config=None):
         require(re.search(r'\.(pdf|png|jpe?g)$',name,re.I),'Only PDF, PNG and JPEG files are supported')
         try: content=base64.b64decode(b.get('content',''),validate=True)
         except (ValueError,TypeError,binascii.Error): raise ValidationError('Invalid file encoding')
-        require(0<len(content)<=10*1024*1024,'File must be between 1 byte and 10 MB')
+        require(0<len(content)<=app.config['UPLOAD_LIMIT_MB']*1024*1024,f'File must be between 1 byte and {app.config["UPLOAD_LIMIT_MB"]} MB')
         ext=name.rsplit('.',1)[-1].lower()
         require(content.startswith(b'%PDF-') if ext=='pdf' else content.startswith(b'\x89PNG\r\n\x1a\n') if ext=='png' else content.startswith(b'\xff\xd8\xff'),'File signature does not match its extension')
         with store.transaction(True) as (db,conn):
             c=get_case(db,identifier);editable(c,db);require(b.get('type') in requirements(c,db),'Choose a configured document category')
-            uid=str(uuid4());conn.execute('INSERT INTO files VALUES (?,?)',(uid,content))
+            uid=str(uuid4());store.put_file(conn,uid,content)
             c['documents'].append(dict(id=uid,name=name.replace('\\','/').split('/')[-1],type=b['type'],size=len(content),status='Pending review',uploadedAt=now()))
             event(c,session['role'],'Document uploaded',b['type'])
         return jsonify(ok=True),201
@@ -201,7 +210,7 @@ def create_app(config=None):
     def download(identifier,document_id):
         with store.transaction() as (db,conn):
             c=get_case(db,identifier);d=next((d for d in c['documents'] if d['id']==document_id),None);require(d is not None,'Document not found')
-            content=b'SYNTHETIC DATA - NOT REAL CLIENT DATA\nIllustrative document; not identity evidence.' if d.get('sample') else conn.execute('SELECT content FROM files WHERE id=?',(document_id,)).fetchone()[0]
+            content=b'SYNTHETIC DATA - NOT REAL CLIENT DATA\nIllustrative document; not identity evidence.' if d.get('sample') else store.get_file(conn,document_id)
             name=d['name']
         return send_file(io.BytesIO(content),as_attachment=True,download_name=name,mimetype='application/octet-stream')
 
@@ -313,7 +322,7 @@ def create_app(config=None):
         return success()
 
     @app.get('/health')
-    def health(): return jsonify(status='ok',runtime='python-flask',synthetic=True)
+    def health(): return jsonify(status='ok',runtime='python-flask',synthetic=True,storage='postgresql' if database_url else 'sqlite')
     @app.get('/')
     def index(): return send_from_directory(ROOT/'public','index.html')
     @app.get('/<path:filename>')

@@ -4,6 +4,34 @@
 
 Native **Python + Streamlit** is the default interface. An optional Flask interface is included. Both use the same Python validation, workflow engine and transactional SQLite document storage. Hosting does not require Node.js or npm. The optional Flask browser interface retains HTML, CSS and browser JavaScript; it is not a Python-rendered UI.
 
+## Live demonstrations
+
+- **Original Aurelia web experience:** https://bankclm.vercel.app — Flask/Python API, original responsive white-and-blue interface, persistent PostgreSQL storage in Singapore.
+- **Native Streamlit experience:** https://bankclm.streamlit.app — configurable Streamlit workspace for Community Cloud or Cloudera.
+
+Both use the same policy and workflow engine, but these deployments have **separate demonstration datasets**. Vercel supports synthetic PDF/PNG/JPEG uploads up to **3 MB** per file, below its function request limit after base64 encoding. Local and Streamlit uploads default to 10 MB.
+
+The Vercel interface includes guided workflow insertion, route/condition editors, simulation, controlled publication, history, migration, policy builders and a custom profile form builder. Use Operations for workflow drafts and UI settings; Compliance for policies, publication and migration.
+
+## Vercel deployment
+
+`pyproject.toml` installs only the Flask/PostgreSQL dependencies on Vercel. The native Streamlit installation uses `requirements.txt`. The Vercel project is `bryanlee/bankclm` and uses a dedicated Neon Free database (`bankclm-demo`) in Singapore.
+
+Required server environment variables: `DATABASE_URL` and `SECRET_KEY`. The database integration supplies the connection string; the signing secret is stored in Vercel, never Git. `COOKIE_SECURE` defaults to enabled on Vercel. Without database configuration, the Vercel app fails explicitly rather than silently losing data in temporary storage.
+
+For an explicit CLI deployment from a clean package:
+
+```powershell
+.\.venv\Scripts\python.exe scripts/package_vercel.py
+Set-Location .deploy-vercel
+npx vercel@59.20.0 link --project bankclm --scope bryanlee
+npx vercel@59.20.0 deploy --prod
+# If needed, assign the requested public alias to the deployment URL:
+npx vercel@59.20.0 alias set <deployment-url> bankclm.vercel.app
+```
+
+The packaging script excludes local cases, uploads, environments, secrets, virtual environments and Streamlit-specific UI modules. PostgreSQL stores file bytes and case changes in one transaction, with row locks to prevent lost updates. This single-state design suits a small synthetic demo; a production bank deployment needs normalized data, authenticated identities and its approved operational controls.
+
 ## Deploy on Streamlit Community Cloud
 
 At https://share.streamlit.io/deploy use:

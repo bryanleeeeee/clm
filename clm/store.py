@@ -48,3 +48,10 @@ class Store:
             raise
         finally:
             conn.close()
+
+    def put_file(self,conn,uid,content):
+        conn.execute('INSERT INTO files VALUES (?,?)',(uid,content))
+
+    def get_file(self,conn,uid):
+        row=conn.execute('SELECT content FROM files WHERE id=?',(uid,)).fetchone()
+        return row[0] if row else None

@@ -1,0 +1,8 @@
+[project]
+name = "aurelia-clm-web"
+version = "2.0.0"
+requires-python = ">=3.12,<3.15"
+dependencies = ["Flask==3.1.3", "psycopg[binary]==3.3.5"]
+
+[tool.vercel]
+entrypoint = "app:app"
