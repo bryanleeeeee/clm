@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+data/
+artifacts/
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+*.sqlite3*
+.session-key
