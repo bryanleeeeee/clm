@@ -85,15 +85,22 @@ def create_app(config=None):
     def editable(c,db): require(stage_for(c,db)['editable'],'This stage is locked; open a review or return for remediation')
     def success(): return jsonify(ok=True)
 
+    from .wealth import register_wealth, assessment, approved, policy as wealth_policy
+    register_wealth(app, store, body, get_case, staff, role, editable)
+
     @app.get('/api/state')
     def state():
         with store.transaction() as (db,_):
             clients=[case_view(c,db,session['role']) for c in db['cases'] if session['role']!='Client' or c['id']==session['clientId']]
+            for c in clients:
+                c['wealthSummary']=assessment(c,db)
+                c.pop('wealth',None)
             result={k:deepcopy(v) for k,v in db.items() if k not in ['cases','workflowVersions']}
             result.update(cases=clients,session=dict(session),stages=list(dict.fromkeys([s['name'] for s in db['workflow']['stages']]+[c['stage'] for c in clients])),schema=dict(roles=ROLES,staff=STAFF,checks=CHECKS,fields=FIELDS,guards=GUARDS,kinds=KINDS),synthetic=True,uploadLimitMB=app.config['UPLOAD_LIMIT_MB'])
+            result['wealthPolicy']=wealth_policy(db)
             if session['role']=='Client':
                 result.pop('configAudit',None);result.pop('workflowDraft',None)
-                for c in clients: c['activity']=[]
+                for c in clients: c['activity']=[];c.pop('wealthSummary',None)
             return jsonify(result)
 
     @app.post('/api/session')
@@ -120,6 +127,7 @@ def create_app(config=None):
             w=db['workflow']
             c=dict(id=f'CLM-2026-{number}',name=name,email=email,type=b['type'],risk=b['risk'],residency=text(b.get('residency','Singapore'),'Residence',100),taxResidency='',sourceOfWealth='',aum=aum,owner=text(b.get('owner','Sarah Chen'),'Owner',100),phone='',pep=bool(b.get('pep')),consent=False,stage=w['startStage'],workflowVersion=w['version'],createdAt=now(),dueDate=date_after(db['settings']['slaDays']),kyc={key:False for key in CHECKS},customFields={},documents=[],activity=[])
             event(c,session['role'],'Onboarding case created','Synthetic client record');db['cases'].insert(0,c)
+            c['wealthRequired']=True
             result=deepcopy(c)
         return jsonify(result),201
 
@@ -172,6 +180,8 @@ def create_app(config=None):
         note=text(b.get('note'),'Review note',2000)
         with store.transaction(True) as (db,_):
             c=get_case(db,identifier);require(stage_for(c,db)['kind']=='review','Due diligence must be in progress')
+            if b['check']=='wealth' and b['checked'] and (c.get('wealthRequired') or c.get('wealth')):
+                require(approved(c,db),'Complete independent approval of the current Source of Wealth dossier first')
             c['kyc'][b['check']]=b['checked'];event(c,session['role'],f'{b["check"]} check '+('completed' if b['checked'] else 'reopened'),note)
         return success()
 
@@ -192,7 +202,7 @@ def create_app(config=None):
         ext=name.rsplit('.',1)[-1].lower()
         require(content.startswith(b'%PDF-') if ext=='pdf' else content.startswith(b'\x89PNG\r\n\x1a\n') if ext=='png' else content.startswith(b'\xff\xd8\xff'),'File signature does not match its extension')
         with store.transaction(True) as (db,conn):
-            c=get_case(db,identifier);editable(c,db);require(b.get('type') in requirements(c,db),'Choose a configured document category')
+            c=get_case(db,identifier);editable(c,db);require(b.get('type') in requirements(c,db)+['Source of wealth evidence'],'Choose a configured document category')
             uid=str(uuid4());store.put_file(conn,uid,content)
             c['documents'].append(dict(id=uid,name=name.replace('\\','/').split('/')[-1],type=b['type'],size=len(content),status='Pending review',uploadedAt=now()))
             event(c,session['role'],'Document uploaded',b['type'])

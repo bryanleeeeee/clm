@@ -40,6 +40,8 @@ def test_full_lifecycle_persistence_and_access(app,client):
     role(client,'Compliance')
     record=next(c for c in call(client,'/state')['cases'] if c['id']==uid)
     for d in record['documents']: call(client,p+'/documents/'+d['id']+'/review','POST',dict(status='Verified',note='Synthetic evidence reviewed'))
+    from test_wealth import approve_dossier
+    approve_dossier(client,uid)
     for check in ['identity','screening','wealth','tax']: call(client,p+'/kyc','PUT',dict(check=check,checked=True,note='Review recorded'))
     # Compliance cannot submit to itself in the default workflow.
     call(client,p+'/transition','POST',{'action':'Request approval'},400)
@@ -48,6 +50,7 @@ def test_full_lifecycle_persistence_and_access(app,client):
     role(client,'Compliance');call(client,p+'/transition','POST',{'action':'Approve & activate'})
     call(client,p+'/transition','POST',{'action':'Start periodic review'})
     call(client,p+'/transition','POST',{'action':'Complete periodic review'},400)
+    approve_dossier(client,uid)
     for check in ['identity','screening','wealth','tax']: call(client,p+'/kyc','PUT',dict(check=check,checked=True,note='Fresh periodic evidence'))
     call(client,p+'/transition','POST',{'action':'Complete periodic review'})
     call(client,p+'/transition','POST',{'action':'Offboard client','note':'short'},400)

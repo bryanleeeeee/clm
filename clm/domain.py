@@ -115,7 +115,11 @@ def guard_issues(c, db, guards, actor, note='', workflow=None):
                 if not found: issues.append(f'{kind} must be '+('verified' if gate=='documents_verified' else 'uploaded'))
         elif gate == 'profile_complete': issues.extend(profile_issues(c,db))
         elif gate == 'consent' and not c['consent']: issues.append('Client declaration is required')
-        elif gate == 'kyc_complete': issues.extend(f'{label} review is incomplete' for key,label in CHECKS.items() if not c['kyc'].get(key))
+        elif gate == 'kyc_complete':
+            issues.extend(f'{label} review is incomplete' for key,label in CHECKS.items() if not c['kyc'].get(key))
+            if c.get('wealthRequired') or c.get('wealth'):
+                from .wealth import approved
+                if not approved(c,db): issues.append('Current Source of Wealth dossier requires independent approval')
         elif gate == 'independent_approval':
             if actor != 'Compliance': issues.append('Compliance approval is required')
             if not c.get('submittedBy') or c['submittedBy']==actor: issues.append('Approver must be independent of the submitting role')
@@ -249,7 +253,11 @@ def execute(c, db, action, actor, note=''):
     issues=guard_issues(c,db,gates,actor,note)
     require(not issues,'; '.join(issues))
     if target['kind']=='approval': c['submittedBy']=actor
-    if route['resetChecks']: c['kyc']={k:False for k in CHECKS}
+    if route['resetChecks']:
+        c['kyc']={k:False for k in CHECKS}
+        if c.get('wealth'):
+            c['wealth']['status']='Draft';c['wealth']['revision']+=1
+            event(c,actor,'Wealth refresh required','Lifecycle review started; reassess current wealth and evidence')
     c['stage']=target['name'];c['dueDate']=date_after(target['slaDays'])
     if target['kind']=='active':
         c.setdefault('activatedAt', now());c['reviewDate']=date_after(365)

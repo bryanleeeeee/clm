@@ -126,3 +126,7 @@ See [verification](docs/VERIFICATION.md) and [vendor research](docs/RESEARCH.md)
 ## Demonstration boundary
 
 This is an end-to-end synthetic workflow demonstration, not a production banking system. Role switching is not authentication; independent approval currently separates roles rather than authenticated people. External screening, OCR, electronic signatures and account provisioning are not connected. Before real-client use, implement bank SSO and user entitlements, independent-person approvals, durable managed storage, malware scanning, encryption/key management, immutable audit retention, monitoring and bank-approved regulatory policies. Sample Singapore controls are not a regulatory compliance certification.
+
+## Source of Wealth intelligence
+
+The Vercel / Flask application includes a six-step wealth assessment workspace: financial profile, wealth timeline, corroborating evidence, plausibility checks, cited template write-up and independent review. See [the Source of Wealth guide](docs/SOURCE_OF_WEALTH.md) for the demo flow, configuration and integration limits.

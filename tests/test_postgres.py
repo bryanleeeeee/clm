@@ -18,7 +18,12 @@ def test_postgres_persistence_rollback_and_concurrency():
         assert response.status_code==201
         cid=response.json['id'];content=b'%PDF-1.4\nSynthetic storage test'
         assert c.post('/api/cases/'+cid+'/documents',json=dict(name='synthetic.pdf',type='Account opening form',content=base64.b64encode(content).decode())).status_code==201
+        from test_wealth import approve_dossier
+        approve_dossier(c,cid)
         fresh=create_app(config).test_client()
+        wealth=fresh.get('/api/cases/'+cid+'/wealth').json
+        assert wealth['assessment']['status']=='Approved'
+        assert len(wealth['dossier']['reviews'])==2
         case=next(x for x in fresh.get('/api/state').json['cases'] if x['id']==cid)
         assert fresh.get('/api/cases/'+cid+'/documents/'+case['documents'][0]['id']).data==content
         with pytest.raises(RuntimeError):
