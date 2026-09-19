@@ -11,3 +11,6 @@
 
 /* Keep primary navigation visible on laptop-height screens. */
 @media(min-width:761px) and (max-height:900px){.sidebar .help-card{display:none}.sidebar{padding-top:18px}.sidebar .brand{padding-bottom:18px}.sidebar .workspace{margin-bottom:16px}.sidebar .nav-item{min-height:40px;padding-top:10px;padding-bottom:10px}.sidebar-bottom{padding-top:10px}.sidebar .nav-label{margin-top:8px;margin-bottom:10px}}
+
+/* Keep secondary controls compact at the foot of the navigation. */
+.sidebar-bottom>.nav-item{min-height:32px;margin-bottom:2px;padding:7px 9px;gap:9px;font-size:10px;color:#8090a4}.sidebar-bottom>.nav-item>.icon{width:15px;height:15px}.sidebar-bottom>.nav-item.selected:before{height:20px}.sidebar-bottom>.nav-item:hover{background:#f6f8fc}
