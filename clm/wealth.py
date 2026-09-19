@@ -5,6 +5,7 @@ from hashlib import sha256
 import json
 import math
 import re
+from decimal import Decimal, ROUND_HALF_UP
 from urllib.parse import urlparse
 from uuid import uuid4
 
@@ -13,6 +14,26 @@ from .domain import require, text, event
 
 CATEGORIES = ['Business ownership', 'Business sale', 'Employment', 'Inheritance / gift', 'Property', 'Investments', 'Other']
 POLICY = dict(coverage=80, enhancedCoverage=100, materiality=10, tolerance=10, freshnessDays=365)
+
+
+EVIDENCE_GUIDANCE = {
+    'Business ownership': 'Audited accounts, ownership register and evidence of retained earnings or dividends.',
+    'Business sale': 'Sale agreement, completion statement, original investment cost and ownership register.',
+    'Employment': 'Employment history, remuneration records, tax returns and a reasonable savings calculation.',
+    'Inheritance / gift': 'Probate or gift records, distribution evidence and the donor’s underlying wealth history.',
+    'Property': 'Acquisition cost, title records, sale completion statement and financing repayment.',
+    'Investments': 'Portfolio history, realised gains and contributions; distinguish returns from reinvested principal.',
+    'Other': 'Primary records that explain the economic activity, ownership and net wealth generated.'
+}
+
+
+def contribution(e):
+    value = Decimal(str(e['amount'])) * Decimal(str(e['fxRate'])) * Decimal(str(e['ownership'])) / 100 - Decimal(str(e['deductions']))
+    return float(value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
+
+
+def event_fingerprint(events, ids):
+    return sha256(json.dumps(sorted([e for e in events if e['id'] in ids], key=lambda e:e['id']), sort_keys=True).encode()).hexdigest()
 
 
 def number(value, label, maximum=1e12):
@@ -63,20 +84,26 @@ def assessment(c, db, include_status=True):
     if not profile.get('fundsOrigin') or not profile.get('remittingBank'): add('funds', 'Explain the opening funds and the remitting bank separately from lifetime wealth.', 'Profile')
     if profile.get('fundsAmount', 0) > declared and declared: add('funds-size', 'Opening funds exceed declared net worth; reconcile the figures.', 'Profile')
     if not w['events']: add('events', 'Add the events that explain how the client accumulated wealth.', 'Journey')
-    amounts = {e['id']: round(e['amount'] * e['fxRate'] * e['ownership'] / 100 - e['deductions'], 2) for e in w['events']}
+    amounts = {e['id']: contribution(e) for e in w['events']}
     total = round(sum(amounts.values()), 2)
-    verified_ids = set(); corroborated = 0; material_gaps = []
+    verified_ids = set(); corroborated = 0; material_gaps = []; matrix=[]; evidence_state={}
     evidence_issues = []
     for e in w['evidence']:
         d = docs.get(e.get('documentId'))
         fresh = (date.today() - date.fromisoformat(e['date'])).days <= p['freshnessDays'] or bool(e.get('historicalReason'))
-        usable = e.get('reviewStatus') == 'Verified' and (not e.get('documentId') or d and d['status'] == 'Verified' and not d.get('sample')) and fresh
+        current = e.get('reviewedEvents') == event_fingerprint(w['events'],e['eventIds'])
+        usable = current and e.get('reviewStatus') == 'Verified' and (not e.get('documentId') or d and d['status'] == 'Verified' and not d.get('sample')) and fresh
+        reason = 'Ready' if usable else 'Event changed or amount review required' if not current else 'Evidence review required' if e.get('reviewStatus')!='Verified' else 'Historical relevance rationale required' if not fresh else 'Uploaded document needs verification'
+        evidence_state[e['id']]=dict(usable=bool(usable),reason=reason)
         if usable: verified_ids.add(e['id'])
         else: evidence_issues.append(e['title'])
     for e in w['events']:
         support = [x for x in w['evidence'] if e['id'] in x['eventIds'] and x['id'] in verified_ids and x['independent']]
-        if support: corroborated += amounts[e['id']]
-        elif total > 0 and amounts[e['id']] / total * 100 >= p['materiality']: material_gaps.append(e['title'])
+        supported=min(amounts[e['id']],max([x.get('supportedAmounts',{}).get(e['id'],0) for x in support] or [0]))
+        corroborated += supported
+        material=total > 0 and amounts[e['id']] / total * 100 >= p['materiality']
+        if material and supported < amounts[e['id']]: material_gaps.append(e['title'])
+        matrix.append(dict(id=e['id'],title=e['title'],category=e['category'],claimed=amounts[e['id']],supported=supported,gap=round(amounts[e['id']]-supported,2),material=material,evidenceIds=[x['id'] for x in support],guidance=EVIDENCE_GUIDANCE[e['category']]))
         if e['category'] == 'Inheritance / gift' and not e.get('originatorBackground'):
             add('donor-'+e['id'], f'{e["title"]}: explain the donor’s underlying source of wealth.', 'Journey')
     coverage = round(corroborated / total * 100, 1) if total else 0
@@ -89,11 +116,14 @@ def assessment(c, db, include_status=True):
     if evidence_issues: add('evidence-review', f'{len(evidence_issues)} evidence item(s) are unreviewed, rejected, stale or linked to an unverified document.', 'Evidence', 'attention')
     if enhanced and not profile.get('enhancedRationale'): add('enhanced', 'Record enhanced due diligence rationale for this high-risk / PEP relationship.', 'Profile')
     if not w['narrative']: add('narrative', 'Prepare and review the source-of-wealth write-up.', 'Write-up')
-    used_citations = set(re.findall(r'\[E:([^\]]+)\]', w['narrative']))
+    body_narrative=w['narrative'].split('6. Evidence register')[0]
+    used_citations = set(re.findall(r'\[E:([^\]]+)\]', body_narrative))
     if used_citations - {e['id'] for e in w['evidence']}: add('citations', 'The write-up contains evidence references that no longer exist. Regenerate or correct them.', 'Write-up')
     if not used_citations and w['narrative']: add('citations-missing', 'Link the write-up to evidence using the supplied citation markers.', 'Write-up')
+    for row in matrix:
+        if row['supported']>0 and not (used_citations & set(row['evidenceIds'])): add('citation-'+row['id'],f'{row["title"]}: cite a supporting, verified source in the narrative body.','Write-up')
     status = 'Needs refresh' if include_status and w['status'] == 'Approved' and not approved(c, db) else w['status']
-    return dict(status=status, enhanced=bool(enhanced), target=target, coverage=coverage, total=total, expected=expected, declared=declared, gap=gap, gapPercent=gap_pct, amounts=amounts, verifiedEvidence=len(verified_ids), findings=findings, ready=not any(f['severity']=='blocker' for f in findings))
+    return dict(status=status, enhanced=bool(enhanced), target=target, coverage=coverage, total=total, expected=expected, declared=declared, gap=gap, gapPercent=gap_pct, amounts=amounts, verifiedEvidence=len(verified_ids), matrix=matrix, evidenceState=evidence_state, findings=findings, ready=not any(f['severity']=='blocker' for f in findings))
 
 
 def validate_content(b, c):
@@ -133,8 +163,11 @@ def validate_content(b, c):
         require(type(e.get('independent')) is bool,'Specify whether evidence is independent');item['independent']=e['independent']
         links=e.get('eventIds'); require(isinstance(links,list) and links and all(x in ids for x in links),'Link evidence to an existing wealth event');item['eventIds']=list(dict.fromkeys(links))
         prior=old.get(uid,{})
-        for k in ['reviewStatus','reviewNote','reviewedAt','reviewedBy']:
-            item[k]=prior.get(k, 'Pending review' if k=='reviewStatus' else '') if all(prior.get(key)==value for key,value in item.items() if key not in ['reviewStatus','reviewNote','reviewedAt','reviewedBy']) else ('Pending review' if k=='reviewStatus' else '')
+        for k in ['reviewStatus','reviewNote','reviewedAt','reviewedBy','reviewedEvents','supportedAmounts']:
+            item[k]=prior.get(k, 'Pending review' if k=='reviewStatus' else '') if all(prior.get(key)==value for key,value in item.items() if key not in ['reviewStatus','reviewNote','reviewedAt','reviewedBy','reviewedEvents','supportedAmounts']) else ('Pending review' if k=='reviewStatus' else '')
+        if prior.get('reviewedEvents') != event_fingerprint(clean_events,item['eventIds']):
+            item.update(reviewStatus='Pending review',reviewedEvents='',supportedAmounts={})
+        if not isinstance(item.get('supportedAmounts'),dict): item['supportedAmounts']={}
         clean_evidence.append(item)
     return dict(profile=profile, events=clean_events, evidence=clean_evidence, narrative=text(b.get('narrative',''),'Write-up',30000,True))
 
@@ -165,7 +198,7 @@ def register_wealth(app, store, body, get_case, staff, role, editable):
         staff()
         with store.transaction() as (db,_):
             c=get_case(db,identifier)
-            return jsonify(dossier=dossier(c), assessment=assessment(c,db), policy=policy(db), categories=CATEGORIES)
+            return jsonify(dossier=dossier(c), assessment=assessment(c,db), policy=policy(db), categories=CATEGORIES, guidance=EVIDENCE_GUIDANCE)
 
     def locked(c,db):
         editable(c,db)
@@ -204,6 +237,14 @@ def register_wealth(app, store, body, get_case, staff, role, editable):
             c=get_case(db,identifier);locked(c,db);w=dossier(c)
             require(b.get('revision')==w['revision'],'Dossier changed; reload first')
             e=next((e for e in w['evidence'] if e['id']==eid),None);require(e is not None,'Evidence not found')
+            amounts=b.get('supportedAmounts',{})
+            require(isinstance(amounts,dict),'Specify supported amounts by event')
+            events={x['id']:x for x in w['events']}
+            if b['status']=='Verified':
+                require(set(amounts)==set(e['eventIds']),'Record the amount supported for each linked event')
+                amounts={uid:number(value,'Supported amount',contribution(events[uid])) for uid,value in amounts.items()}
+            else: amounts={}
+            e.update(supportedAmounts=amounts,reviewedEvents=event_fingerprint(w['events'],e['eventIds']))
             e.update(reviewStatus=b['status'],reviewNote=note,reviewedAt=now(),reviewedBy=session['role']);w['narrative']='';c['wealth']=w;touch(c,'Wealth evidence '+b['status'].lower(),session['role'],e['title']+': '+note)
         return jsonify(ok=True)
 
@@ -229,7 +270,7 @@ def register_wealth(app, store, body, get_case, staff, role, editable):
                     w['status']='Approved';w['approvedFingerprint']=fingerprint(c,db)
                     # The dedicated dossier decision is separate from the case-level KYC attestation.
                 else: w['status']='Changes requested'
-            w['reviews'].insert(0,dict(id=str(uuid4()),at=now(),actor=session['role'],action=action,note=note,revision=w['revision'],snapshot={k:deepcopy(w[k]) for k in ['profile','events','evidence','narrative']}))
+            w['reviews'].insert(0,dict(id=str(uuid4()),at=now(),actor=session['role'],action=action,note=note,revision=w['revision'],snapshot={**{k:deepcopy(w[k]) for k in ['profile','events','evidence','narrative']},'policy':deepcopy(policy(db)),'client':{k:c.get(k) for k in ['name','risk','pep','residency']},'documents':deepcopy(c['documents'])}))
             w['revision']+=1;w['updatedAt']=now();c['wealth']=w;event(c,session['role'],'Wealth dossier '+w['status'].lower(),note)
         return jsonify(ok=True)
 
@@ -239,6 +280,19 @@ def register_wealth(app, store, body, get_case, staff, role, editable):
         with store.transaction() as (db,_):
             c=get_case(db,identifier);out=dict(synthetic=True,client=c['name'],caseId=identifier,dossier=dossier(c),assessment=assessment(c,db),policy=policy(db))
         return send_file(io.BytesIO(json.dumps(out,indent=2).encode()),mimetype='application/json',as_attachment=True,download_name=identifier+'-wealth-review.json')
+
+    @app.get('/api/cases/<identifier>/wealth/report')
+    def report(identifier):
+        staff()
+        from html import escape
+        with store.transaction() as (db,_):
+            c=get_case(db,identifier);w=dossier(c);a=assessment(c,db)
+            esc=lambda v: escape(str(v))
+            rows=''.join(f'<tr><td>{esc(x["title"])}</td><td>{x["claimed"]:,.2f}</td><td>{x["supported"]:,.2f}</td><td>{x["gap"]:,.2f}</td></tr>' for x in a['matrix'])
+            findings=''.join('<li>'+esc(x['message'])+'</li>' for x in a['findings'])
+            decisions=''.join(f'<article><h3>{esc(r["action"])} · {esc(r["actor"])}</h3><p>{esc(r["at"])} · revision {r["revision"]}</p><p>{esc(r["note"])}</p></article>' for r in w['reviews'])
+            content=f'''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Wealth review {esc(identifier)}</title><style>body{{font:15px/1.7 system-ui;color:#193452;max-width:960px;margin:40px auto;padding:24px}}header{{border-bottom:3px solid #3875c5;padding-bottom:20px}}.notice{{padding:14px;background:#edf4ff}}table{{border-collapse:collapse;width:100%}}th,td{{padding:12px;text-align:left;border-bottom:1px solid #ddd}}pre{{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}}article{{border-top:1px solid #ddd;padding:15px 0}}@media print{{body{{margin:0}}}}</style><div class="notice">SYNTHETIC DATA — NOT REAL CLIENT DATA</div><header><h1>Source of Wealth review</h1><h2>{esc(c['name'])}</h2><p>{esc(identifier)} · {esc(a['status'])} · revision {w['revision']} · exported {esc(now())}</p></header><h2>Evidence coverage</h2><p>Independent coverage {a['coverage']}%. Supported amounts use the strongest reviewed source per event, not the sum of overlapping sources.</p><table><thead><tr><th>Wealth event</th><th>Claimed SGD</th><th>Supported SGD</th><th>Gap SGD</th></tr></thead><tbody>{rows}</tbody></table><h2>Outstanding findings</h2><ul>{findings or '<li>No configured blocking findings.</li>'}</ul><h2>Write-up</h2><pre>{esc(w['narrative'] or 'No write-up prepared.')}</pre><h2>Decision history</h2>{decisions or '<p>No decisions recorded.</p>'}<p>Prepared from recorded inputs. Human review is required. No live AI, screening or factual verification service is connected. The JSON review pack retains full historical snapshots.</p></html>'''
+        return send_file(io.BytesIO(content.encode()),mimetype='text/html',as_attachment=True,download_name=identifier+'-wealth-report.html')
 
     @app.put('/api/wealth-policy')
     def configure():

@@ -22,7 +22,7 @@ def approve_dossier(client, cid):
     call(client,path,"PUT",w)
     switch(client,"Compliance")
     w=call(client,path)["dossier"]
-    call(client,path+"/evidence/evidence-1/review","POST",dict(revision=w["revision"],status="Verified",note="Synthetic fixture only, reviewed for automated testing"))
+    call(client,path+"/evidence/evidence-1/review","POST",dict(revision=w["revision"],status="Verified",supportedAmounts={"event-1":1000000},note="Synthetic fixture only, reviewed for automated testing"))
     switch(client,"Relationship manager")
     w=call(client,path)["dossier"]
     call(client,path+"/draft","POST",dict(revision=w["revision"]))
@@ -122,9 +122,9 @@ def test_document_corroboration_requires_verified_non_sample(client):
     s=call(client,"/state");record=next(x for x in s["cases"] if x["id"]==cid);doc=record["documents"][-1]
     w=call(client,p)["dossier"];w["evidence"][0]["documentId"]=doc["id"];w["evidence"][0]["url"]=""
     call(client,p,"PUT",w);switch(client,"Compliance");w=call(client,p)["dossier"]
-    call(client,p+"/evidence/evidence-1/review","POST",dict(revision=w["revision"],status="Verified",note="Claim inspected"))
+    call(client,p+"/evidence/evidence-1/review","POST",dict(revision=w["revision"],status="Verified",supportedAmounts={"event-1":1000000},note="Claim inspected"))
     assert call(client,p)["assessment"]["coverage"]==0
-    call(client,"/cases/"+cid+"/documents/"+doc["id"]+"/review","POST",dict(status="Verified",note="Document checked"))
+    call(client,"/cases/"+cid+"/documents/"+doc["id"]+"/review","POST",dict(status="Verified",supportedAmounts={"event-1":1000000},note="Document checked"))
     assert call(client,p)["assessment"]["coverage"]==100
 
 
@@ -155,3 +155,45 @@ def test_untrusted_identifier_and_review_status_cannot_be_injected(client):
     assert call(client,p)["dossier"]["evidence"][0]["reviewStatus"]=="Pending review"
     w=call(client,p)["dossier"];w["events"][0]["id"]='bad" onclick="alert(1)'
     call(client,p,"PUT",w,400)
+
+
+def test_partial_evidence_and_changed_events_require_new_review(client):
+    cid=create(client);p=approve_dossier(client,cid)
+    switch(client,"Compliance");w=call(client,p)["dossier"]
+    call(client,p+"/evidence/evidence-1/review","POST",dict(revision=w["revision"],status="Verified",supportedAmounts={"event-1":400000},note="Only part of the amount is independently supported"))
+    a=call(client,p)["assessment"]
+    assert a["coverage"]==40
+    assert a["matrix"][0]["gap"]==600000
+    assert not a["ready"]
+    switch(client,"Relationship manager");w=call(client,p)["dossier"]
+    w["events"][0]["description"]="The economic explanation changed"
+    call(client,p,"PUT",w)
+    r=call(client,p)
+    assert r["dossier"]["evidence"][0]["reviewStatus"]=="Pending review"
+    assert r["assessment"]["coverage"]==0
+
+
+def test_overlap_is_not_summed_and_report_escapes_content(client):
+    cid=create(client);p=approve_dossier(client,cid)
+    switch(client,"Relationship manager");w=call(client,p)["dossier"]
+    second=deepcopy(w["evidence"][0]);second["id"]="evidence-2"
+    w["evidence"].append(second);w["profile"]["background"]="<script>alert(1)</script>"
+    call(client,p,"PUT",w);switch(client,"Compliance")
+    for eid in ["evidence-1","evidence-2"]:
+        w=call(client,p)["dossier"]
+        call(client,p+"/evidence/"+eid+"/review","POST",dict(revision=w["revision"],status="Verified",supportedAmounts={"event-1":600000},note="Overlapping evidence for the same amount"))
+    assert call(client,p)["assessment"]["coverage"]==60
+    switch(client,"Relationship manager");w=call(client,p)["dossier"]
+    call(client,p+"/draft","POST",dict(revision=w["revision"]))
+    response=client.get("/api"+p+"/report")
+    assert response.status_code==200
+    assert b"<script>" not in response.data
+    assert b"&lt;script&gt;" in response.data
+
+
+def test_citations_must_support_narrative_body(client):
+    cid=create(client);p=approve_dossier(client,cid)
+    switch(client,"Relationship manager");w=call(client,p)["dossier"]
+    w["narrative"]="Wealth claim without a reference.\n6. Evidence register\n[E:evidence-1]"
+    call(client,p,"PUT",w)
+    assert not call(client,p)["assessment"]["ready"]

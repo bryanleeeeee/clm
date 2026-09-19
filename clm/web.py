@@ -85,6 +85,9 @@ def create_app(config=None):
     def editable(c,db): require(stage_for(c,db)['editable'],'This stage is locked; open a review or return for remediation')
     def success(): return jsonify(ok=True)
 
+    from .tasks import register_tasks, visible_tasks
+    register_tasks(app, store, body, get_case, staff)
+
     from .wealth import register_wealth, assessment, approved, policy as wealth_policy
     register_wealth(app, store, body, get_case, staff, role, editable)
 
@@ -93,6 +96,7 @@ def create_app(config=None):
         with store.transaction() as (db,_):
             clients=[case_view(c,db,session['role']) for c in db['cases'] if session['role']!='Client' or c['id']==session['clientId']]
             for c in clients:
+                c['tasks']=visible_tasks(c,session['role'])
                 c['wealthSummary']=assessment(c,db)
                 c.pop('wealth',None)
             result={k:deepcopy(v) for k,v in db.items() if k not in ['cases','workflowVersions']}
