@@ -126,3 +126,32 @@ def test_document_corroboration_requires_verified_non_sample(client):
     assert call(client,p)["assessment"]["coverage"]==0
     call(client,"/cases/"+cid+"/documents/"+doc["id"]+"/review","POST",dict(status="Verified",note="Document checked"))
     assert call(client,p)["assessment"]["coverage"]==100
+
+
+def test_expiry_and_archived_evidence_are_visible(client, monkeypatch):
+    from datetime import timedelta
+    import clm.wealth as module
+    cid=create(client);p=approve_dossier(client,cid)
+    class LaterDate(date):
+        @classmethod
+        def today(cls): return date.today()+timedelta(days=400)
+    monkeypatch.setattr(module,"date",LaterDate)
+    assert call(client,p)["assessment"]["status"]=="Needs refresh"
+    assert call(client,p)["assessment"]["coverage"]==0
+    switch(client,"Relationship manager");w=call(client,p)["dossier"]
+    w["evidence"]=[]
+    call(client,p,"PUT",w)
+    stored=call(client,p)["dossier"]
+    assert stored["archivedItems"][0]["value"]["title"]=="Synthetic registry test fixture"
+    assert stored["narrative"]==""
+
+
+def test_untrusted_identifier_and_review_status_cannot_be_injected(client):
+    cid=create(client);p=approve_dossier(client,cid)
+    switch(client,"Relationship manager");w=call(client,p)["dossier"]
+    w["evidence"][0]["excerpt"]="Edited claim"
+    w["evidence"][0]["reviewStatus"]="Verified"
+    call(client,p,"PUT",w)
+    assert call(client,p)["dossier"]["evidence"][0]["reviewStatus"]=="Pending review"
+    w=call(client,p)["dossier"];w["events"][0]["id"]='bad" onclick="alert(1)'
+    call(client,p,"PUT",w,400)
